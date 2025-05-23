@@ -112,42 +112,29 @@ choropleth_metric = st.selectbox(
     index=metrics.index("roas_w0") if "roas_w0" in metrics else 0
 )
 
-# --- Вот здесь фильтруем по installs ---
 min_installs = 300
 display_df = df[df['installs'] >= min_installs].copy()
 
-# --- Домножаем на 100, если это ROAS ---
 if "roas" in choropleth_metric.lower():
     display_df[choropleth_metric] = display_df[choropleth_metric] * 100
 
 display_df['week'] = display_df['week'].astype(str)
 
-# --- 99-й перцентиль по выбранной метрике ---
-if "roas" in choropleth_metric.lower():
-    vals = display_df[choropleth_metric][display_df[choropleth_metric] > 0]
-    metric_max = np.percentile(vals, 99) if not vals.empty else 1
-    metric_min = 0
-else:
-    vals = display_df[choropleth_metric]
-    metric_min = vals.min()
-    metric_max = np.percentile(vals, 99) if not vals.empty else 1
-
 color_scales = ['Viridis', 'Plasma', 'Cividis', 'Inferno', 'Turbo', 'Bluered', 'Magma']
 color_scale = st.selectbox("🎨 Цветовая схема", color_scales, index=0)
 
-# Для отладки — хардкодим диапазон!
 fig = px.choropleth(
-    df_week,
+    display_df,
     locations="country",
     locationmode="country names",
     color=choropleth_metric,
     hover_name="country",
-    color_continuous_scale='Viridis',  # или Turbo
+    animation_frame="week",
+    color_continuous_scale=color_scale,
     projection="natural earth",
-    range_color=[0, 100],  # Всегда 0–100%
-    title=f"{choropleth_metric} (%) by Country — {selected_week}"
+    range_color=[0, 100],  # <--- Вот тут фиксируем!
+    title=f"Animated {choropleth_metric} (%) by Country and Week"
 )
-
 
 fig.update_geos(
     showcoastlines=True,
