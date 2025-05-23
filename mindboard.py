@@ -38,18 +38,30 @@ fig = px.choropleth(
     locationmode="country names",
     color=metric,
     hover_name="country",
-    color_continuous_scale="YlGnBu",
+    color_continuous_scale="Viridis",  # Больше контраста!
     title=f"{metric} by Country — {week}",
-    projection="natural earth"
+    projection="natural earth",
 )
-fig.update_geos(showcoastlines=True, showcountries=True, fitbounds="locations")
-fig.update_layout(margin={"r":0,"t":40,"l":0,"b":0})
+
+# Границы стран
+fig.update_geos(showcoastlines=True, coastlinecolor="Black",
+                showframe=False, showland=True, landcolor="rgb(220,220,220)")
+
+# Подписи на ховере
+fig.update_traces(
+    hovertemplate="<b>%{hovertext}</b><br>" +
+                  metric + ": %{z:.2f}<extra></extra>"
+)
+
+# Яркая граница и отсутствие заливки у стран без данных
+fig.update_traces(marker_line_width=1.2, marker_line_color="black")
+
+fig.update_layout(
+    margin={"r":0,"t":40,"l":0,"b":0},
+    coloraxis_colorbar=dict(title=metric),
+    geo=dict(bgcolor='rgba(0,0,0,0)'),
+    paper_bgcolor='rgba(0,0,0,0)',
+)
 
 st.plotly_chart(fig, use_container_width=True)
 
-st.markdown(
-    """
-    <sup>💡 Данные обновляются по выбранной неделе и метрике. Карта может не отобразить некоторые страны, если их названия не совпадают с внутренними у plotly. В этом случае попробуй поменять страну в данных на английское написание.</sup>
-    """,
-    unsafe_allow_html=True
-)
