@@ -8,7 +8,7 @@ st.title("🌍 World ROAS Dashboard by Week")
 # --- Загрузка данных ---
 @st.cache_data
 def load_data():
-    df = pd.read_csv("2025-5-23_20_4_adjust_report_export.csv")
+    df = pd.read_csv("data.csv")
     return df
 
 df = load_data()
