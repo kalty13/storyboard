@@ -4,7 +4,7 @@ import plotly.express as px
 import numpy as np
 
 st.set_page_config(layout="wide")
-st.title("🌍 Animated ROAS Dashboard (Choropleth by week, 99th percentile, min installs filter)")
+st.title("🌍 GEO/ROAS Dashboard (Choropleth by week, 99th percentile, min installs filter)")
 
 # ===== Pro Mode (уменьшенная кнопка + увеличенный тумблер) =====
 st.markdown("""
