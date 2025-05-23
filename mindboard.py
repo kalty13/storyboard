@@ -12,6 +12,26 @@ def load_data():
 
 df = load_data()
 
+# Фильтруем страны, где installs < 300 за неделю
+display_df = df.copy()
+display_df = display_df[display_df['installs'] >= 300]
+
+if "roas" in choropleth_metric.lower():
+    display_df[choropleth_metric] = display_df[choropleth_metric] * 100
+
+display_df['week'] = display_df['week'].astype(str)
+
+# Игнорируем выбросы — 99-й перцентиль только по оставшимся данным!
+if "roas" in choropleth_metric.lower():
+    roas_vals = display_df[choropleth_metric][display_df[choropleth_metric] > 0]
+    metric_max = np.percentile(roas_vals, 99)
+    metric_min = 0
+else:
+    metric_min = display_df[choropleth_metric].min()
+    metric_max = np.percentile(display_df[choropleth_metric], 99)
+
+# дальше всё как раньше...
+
 exclude_cols = {"week", "country", "channel"}
 metrics = [col for col in df.columns if df[col].dtype in [float, int] and col not in exclude_cols]
 
