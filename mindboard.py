@@ -21,9 +21,10 @@ df_filtered = df.copy()
 if selected_channel != "Все":
     df_filtered = df_filtered[df_filtered['channel'] == selected_channel]
 
-# 2. Фильтр по неделе
+# 2. Слайдер по неделям
 weeks = sorted(df_filtered['week'].unique())
-selected_week = st.selectbox("Неделя", weeks, index=0)
+week_idx = st.slider("Неделя", min_value=0, max_value=len(weeks)-1, value=0, format="%d")
+selected_week = weeks[week_idx]
 
 # 3. Фильтр по installs
 min_installs = 300
@@ -33,19 +34,29 @@ df_week = df_filtered[(df_filtered['week'] == selected_week) & (df_filtered['ins
 exclude_cols = {"week", "country", "channel"}
 metrics = [col for col in df.columns if df[col].dtype in [float, int] and col not in exclude_cols]
 choropleth_metric = st.selectbox(
-    "Метрика для сравнения (ROAS, LTV и т.д.)",
+    "Основная метрика (ROAS, LTV и т.д.)",
     metrics,
     index=metrics.index("roas_w0") if "roas_w0" in metrics else 0
+)
+
+# Вторая метрика (для подписи)
+secondary_metric = st.selectbox(
+    "Вторая метрика (доп. подпись)", 
+    [""] + metrics,
+    index=0
 )
 
 # 5. Перевод ROAS в проценты
 if "roas" in choropleth_metric.lower():
     df_week[choropleth_metric] = df_week[choropleth_metric] * 100
+if secondary_metric and "roas" in secondary_metric.lower():
+    df_week[secondary_metric] = df_week[secondary_metric] * 100
 
 # 6. Агрегация по стране (если дубликаты)
-df_week_agg = df_week.groupby('country', as_index=False).agg(
-    {choropleth_metric: 'max', 'installs': 'sum'}
-)
+agg_dict = {choropleth_metric: 'max', 'installs': 'sum'}
+if secondary_metric:
+    agg_dict[secondary_metric] = 'max'
+df_week_agg = df_week.groupby('country', as_index=False).agg(agg_dict)
 
 # 7. Добавляем флаги и подписи
 def country_to_flag(country_name):
@@ -56,11 +67,20 @@ def country_to_flag(country_name):
         return ''
 
 df_week_agg['flag'] = df_week_agg['country'].apply(country_to_flag)
-df_week_agg['country_label'] = (
-    df_week_agg['flag'] + ' ' + df_week_agg['country'] +
-    f' — ' + df_week_agg[choropleth_metric].round(1).astype(str) + '%' +
-    ' (' + df_week_agg['installs'].astype(int).astype(str) + ' installs)'
-)
+
+# Собираем лейбл с двумя метриками
+def build_label(row):
+    parts = [row['flag'], row['country']]
+    if secondary_metric:
+        if "roas" in secondary_metric.lower():
+            sec = f"{row[secondary_metric]:.1f}%"
+        else:
+            sec = f"{row[secondary_metric]:.2f}"
+        parts.append(f"[{sec}]")
+    parts.append(f"({row['installs']} installs)")
+    return " ".join(parts)
+
+df_week_agg['country_label'] = df_week_agg.apply(build_label, axis=1)
 
 # 8. Цветовой градиент для баров (от min до max)
 norm = matplotlib.colors.Normalize(
@@ -69,7 +89,7 @@ norm = matplotlib.colors.Normalize(
 colormap = matplotlib.cm.get_cmap('plasma')
 df_week_agg['bar_color'] = df_week_agg[choropleth_metric].apply(lambda x: matplotlib.colors.rgb2hex(colormap(norm(x))))
 
-# 9. Построение barplot
+# 9. Барплот
 fig = px.bar(
     df_week_agg,
     y='country_label',
