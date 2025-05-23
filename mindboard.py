@@ -12,6 +12,17 @@ def load_data():
 
 df = load_data()
 
+exclude_cols = {"week", "country", "channel"}
+metrics = [col for col in df.columns if df[col].dtype in [float, int] and col not in exclude_cols]
+
+choropleth_metric = st.selectbox(
+    "🗺 Метрика для заливки карты (Choropleth)",
+    metrics,
+    index=metrics.index("roas_w0") if "roas_w0" in metrics else 0
+)
+
+st.write(f"Выбрана метрика: {choropleth_metric}")
+st.write(f"Минимум: {metric_min}, Максимум: {metric_max}")
 # Фильтруем страны, где installs < 300 за неделю
 display_df = df.copy()
 display_df = display_df[display_df['installs'] >= 300]
@@ -31,19 +42,6 @@ else:
     metric_max = np.percentile(display_df[choropleth_metric], 99)
 
 # дальше всё как раньше...
-
-exclude_cols = {"week", "country", "channel"}
-metrics = [col for col in df.columns if df[col].dtype in [float, int] and col not in exclude_cols]
-
-choropleth_metric = st.selectbox(
-    "🗺 Метрика для заливки карты (Choropleth)",
-    metrics,
-    index=metrics.index("roas_w0") if "roas_w0" in metrics else 0
-)
-
-st.write(f"Выбрана метрика: {choropleth_metric}")
-st.write(f"Минимум: {metric_min}, Максимум: {metric_max}")
-
 
 # Домножаем, если это ROAS
 display_df = df.copy()
