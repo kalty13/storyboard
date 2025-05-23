@@ -1,10 +1,10 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import plotly.graph_objects as go
 import pycountry
 
 st.set_page_config(layout="wide")
-st.title("📊 Сравнение метрик по странам — Grouped Bar Chart")
+st.title("🪄 Комбинированная динамика: ROAS vs LTV/CPI")
 
 @st.cache_data
 def load_data():
@@ -12,87 +12,101 @@ def load_data():
 
 df = load_data()
 
-# Фильтр по каналу
 channels = ["Все"] + sorted(df['channel'].unique())
 selected_channel = st.selectbox("Канал", channels)
 df_filtered = df.copy()
 if selected_channel != "Все":
     df_filtered = df_filtered[df_filtered['channel'] == selected_channel]
 
-# Слайдер по неделям
-weeks = sorted(df_filtered['week'].unique())
-week_idx = st.slider("Неделя", min_value=0, max_value=len(weeks)-1, value=0, format="%d")
-selected_week = weeks[week_idx]
-
-# Фильтр по installs
+# --- Фильтр по installs ---
 min_installs = 300
-df_week = df_filtered[(df_filtered['week'] == selected_week) & (df_filtered['installs'] >= min_installs)].copy()
+df_filtered = df_filtered[df_filtered['installs'] >= min_installs]
 
-# Метрики (можно выбрать несколько)
+# --- Метрики и страны ---
 exclude_cols = {"week", "country", "channel"}
 all_metrics = [col for col in df.columns if df[col].dtype in [float, int] and col not in exclude_cols]
 
-multi_metrics = st.multiselect(
-    "Какие метрики сравнивать?",
-    all_metrics,
-    default=[m for m in ["roas_w0", "lifetime_value", "cpi"] if m in all_metrics]
+# Основная метрика по левой оси (например, roas_w0)
+main_metric = st.selectbox(
+    "Основная метрика (левая ось Y)", 
+    [m for m in all_metrics if "roas" in m.lower()],
+    index=0
 )
-if not multi_metrics:
-    st.warning("Выбери хотя бы одну метрику!")
-    st.stop()
 
-# Переводим ROAS в проценты (для наглядности)
-for m in multi_metrics:
-    if "roas" in m.lower():
-        df_week[m] = df_week[m] * 100
+# Метрики по правой оси
+right_metrics = ["cpi", "lifetime_value", "ltv_adv", "ltv_sub"]  # укажи названия как в твоём CSV!
+right_metrics = [m for m in right_metrics if m in all_metrics]
 
-# Агрегируем (max или mean по стране)
-df_group = df_week.groupby("country", as_index=False)[multi_metrics].max()
+all_countries = sorted(df_filtered['country'].unique())
+selected_countries = st.multiselect("Страны", all_countries, default=all_countries[:3])
+df_plot = df_filtered[df_filtered['country'].isin(selected_countries)]
 
-# Добавляем флаги
+# --- Добавляем флаги для красоты ---
 def country_to_flag(country_name):
     try:
         country = pycountry.countries.lookup(country_name)
         return ''.join([chr(127397 + ord(c)) for c in country.alpha_2.upper()])
     except Exception:
         return ''
+df_plot['country_flag'] = df_plot['country'].apply(country_to_flag)
+df_plot['country_label'] = df_plot['country_flag'] + ' ' + df_plot['country']
 
-df_group['flag'] = df_group['country'].apply(country_to_flag)
-df_group['country_label'] = df_group['flag'] + ' ' + df_group['country']
+# --- Преобразуем ROAS в % ---
+if "roas" in main_metric.lower():
+    df_plot[main_metric] = df_plot[main_metric] * 100
 
-# Строим длинную таблицу для plotly
-df_long = df_group.melt(
-    id_vars=['country_label'],
-    value_vars=multi_metrics,
-    var_name='metric',
-    value_name='value'
-)
+# --- Сортируем недели для корректного графика ---
+weeks = sorted(df_plot['week'].unique())
+df_plot['week'] = pd.Categorical(df_plot['week'], categories=weeks, ordered=True)
 
-# Если в multi_metrics есть ROAS — подписываем %
-def pretty_value(row):
-    if "roas" in row['metric'].lower():
-        return f"{row['value']:.2f}%"
-    else:
-        return f"{row['value']:.2f}"
+# --- Построение комбинированного графика ---
+fig = go.Figure()
 
-df_long['pretty_value'] = df_long.apply(pretty_value, axis=1)
+# Основная ось Y — ROAS (или что выбрано), по странам
+for country in selected_countries:
+    mask = df_plot['country'] == country
+    fig.add_trace(go.Scatter(
+        x=df_plot[mask]['week'],
+        y=df_plot[mask][main_metric],
+        name=f"{main_metric.upper()} {country_to_flag(country)} {country}",
+        mode="lines+markers",
+        yaxis="y1"
+    ))
 
-# График
-fig = px.bar(
-    df_long,
-    x="country_label",
-    y="value",
-    color="metric",
-    barmode="group",
-    text='pretty_value',
-    labels={"value": "Значение", "country_label": "Страна", "metric": "Метрика"},
-    title=f"Группированный барчарт: {', '.join(multi_metrics)} — {selected_week}"
-)
-fig.update_traces(textposition='outside')
+# Правая ось Y2 — остальные метрики (по странам)
+color_map = ["#A93226", "#2874A6", "#229954", "#AF7AC5", "#F5B041"]
+for idx, metric in enumerate(right_metrics):
+    for country in selected_countries:
+        mask = df_plot['country'] == country
+        fig.add_trace(go.Scatter(
+            x=df_plot[mask]['week'],
+            y=df_plot[mask][metric],
+            name=f"{metric.upper()} {country_to_flag(country)} {country}",
+            mode="lines+markers",
+            yaxis="y2",
+            line=dict(dash='dot', color=color_map[idx % len(color_map)])
+        ))
+
+# Лейаут и подписи
 fig.update_layout(
-    xaxis_title="Страна",
-    yaxis_title="Значение",
-    margin={"r":30,"t":40,"l":0,"b":0},
-    height=600,
+    title="Сравнение динамики: основная метрика (Y1) + LTV/CPI/др. (Y2)",
+    xaxis=dict(title="Неделя"),
+    yaxis=dict(title=f"{main_metric.upper()} (%)" if 'roas' in main_metric.lower() else main_metric.upper()),
+    yaxis2=dict(
+        title="CPI / LTV / Adv LTV / Sub LTV",
+        overlaying='y',
+        side='right',
+        showgrid=False,
+    ),
+    legend=dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.02,
+        xanchor="center",
+        x=0.5
+    ),
+    margin=dict(r=30, t=60, l=30, b=30),
+    height=600
 )
+
 st.plotly_chart(fig, use_container_width=True)
