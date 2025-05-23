@@ -27,6 +27,13 @@ selected_week = st.selectbox("Неделя", sorted(df['week'].unique()), index=
 
 df_week = df[(df['week'] == selected_week) & (df['installs'] >= min_installs)].copy()
 
+channels = ["Все"] + sorted(df['channel'].unique())
+selected_channel = st.selectbox("Канал", channels)
+
+if selected_channel != "Все":
+    df = df[df['channel'] == selected_channel]
+
+
 if "roas" in choropleth_metric.lower():
     df_week[choropleth_metric] = df_week[choropleth_metric] * 100
 
@@ -44,12 +51,6 @@ df_week = df_week.sort_values(choropleth_metric, ascending=False)
 # Собираем лейблы: Флаг + Название
 df_week['country_label'] = df_week['flag'] + ' ' + df_week['country']
 
-country_check = 'Canada'
-debug_df = df[(df['country'] == country_check) & (df['week'] == selected_week)]
-st.write(f"Все значения по {country_check} в {selected_week}:")
-st.dataframe(debug_df)
-st.write("После фильтрации (installs >= 300):")
-st.dataframe(df_week[df_week['country'] == country_check])
 
 
 fig = px.bar(
