@@ -44,6 +44,14 @@ df_week = df_week.sort_values(choropleth_metric, ascending=False)
 # Собираем лейблы: Флаг + Название
 df_week['country_label'] = df_week['flag'] + ' ' + df_week['country']
 
+country_check = 'Canada'
+debug_df = df[(df['country'] == country_check) & (df['week'] == selected_week)]
+st.write(f"Все значения по {country_check} в {selected_week}:")
+st.dataframe(debug_df)
+st.write("После фильтрации (installs >= 300):")
+st.dataframe(df_week[df_week['country'] == country_check])
+
+
 fig = px.bar(
     df_week,
     y='country_label',
