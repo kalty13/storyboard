@@ -3,65 +3,60 @@ import pandas as pd
 import plotly.express as px
 
 st.set_page_config(layout="wide")
-st.title("🌍 World ROAS Dashboard by Week")
+st.title("🌍 Animated ROAS Dashboard: Choropleth + Bubble Map")
 
-# --- Загрузка данных ---
 @st.cache_data
 def load_data():
-    df = pd.read_csv("data.csv")
-    return df
+    return pd.read_csv("data.csv")
 
 df = load_data()
 
-# --- Преобразование данных ---
-# Список метрик (все float-колонки, кроме installs/ecpi)
+# Список метрик
 exclude_cols = {"week", "country", "channel"}
 metrics = [col for col in df.columns if df[col].dtype in [float, int] and col not in exclude_cols]
 
-# Список недель
-weeks = sorted(df['week'].unique())
+choropleth_metric = st.selectbox("🗺 Метрика для заливки карты (Choropleth)", metrics, index=metrics.index("roas_w0") if "roas_w0" in metrics else 0)
+bubble_metric = st.selectbox("🔵 Метрика для баблов (Bubble)", metrics, index=metrics.index("installs") if "installs" in metrics else 0)
 
-# --- UI ---
-col1, col2 = st.columns([2, 3])
-with col1:
-    metric = st.selectbox("📈 Выберите метрику", metrics, index=metrics.index("roas_w0") if "roas_w0" in metrics else 0)
-with col2:
-    week = st.select_slider("🗓 Неделя", options=weeks, value=weeks[0])
+# Делай неделю стрингом для анимации
+df['week'] = df['week'].astype(str)
 
-# --- Фильтрация данных ---
-df_week = df[df['week'] == week]
-
-# --- Карта ---
+# Основная карта-анимация
 fig = px.choropleth(
-    df_week,
+    df,
     locations="country",
     locationmode="country names",
-    color=metric,
+    color=choropleth_metric,
     hover_name="country",
-    color_continuous_scale="Viridis",  # Больше контраста!
-    title=f"{metric} by Country — {week}",
+    animation_frame="week",
+    color_continuous_scale="Viridis",
     projection="natural earth",
+    title=f"Animated {choropleth_metric} + {bubble_metric} (bubbles) by Country and Week"
 )
 
-# Границы стран
-fig.update_geos(showcoastlines=True, coastlinecolor="Black",
-                showframe=False, showland=True, landcolor="rgb(220,220,220)")
+# Добавляем баблы — делаем отдельный scatter_geo поверх карты
+for week in df['week'].unique():
+    df_week = df[df['week'] == week]
+    fig.add_scattergeo(
+        locations=df_week["country"],
+        locationmode="country names",
+        lon=None, lat=None,
+        text=df_week["country"],
+        marker=dict(
+            size=df_week[bubble_metric].fillna(0).clip(lower=1)**0.7 * 6, # Размер бабла
+            color='rgba(255,0,100,0.6)',
+            line_width=0,
+        ),
+        name=f"Bubbles ({week})",
+        hoverinfo="text+marker.size",
+        visible=False
+    )
 
-# Подписи на ховере
-fig.update_traces(
-    hovertemplate="<b>%{hovertext}</b><br>" +
-                  metric + ": %{z:.2f}<extra></extra>"
-)
+# Фикс: делаем баблы видимыми только для первого кадра
+if len(fig.frames) > 0:
+    fig.data[len(fig.data)-len(df['week'].unique())].visible = True
 
-# Яркая граница и отсутствие заливки у стран без данных
-fig.update_traces(marker_line_width=1.2, marker_line_color="black")
-
-fig.update_layout(
-    margin={"r":0,"t":40,"l":0,"b":0},
-    coloraxis_colorbar=dict(title=metric),
-    geo=dict(bgcolor='rgba(0,0,0,0)'),
-    paper_bgcolor='rgba(0,0,0,0)',
-)
+fig.update_geos(showcoastlines=True, showcountries=True, fitbounds="locations", coastlinecolor="Black")
+fig.update_layout(margin={"r":0,"t":40,"l":0,"b":0})
 
 st.plotly_chart(fig, use_container_width=True)
-
