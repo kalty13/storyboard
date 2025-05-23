@@ -4,7 +4,7 @@ import plotly.express as px
 import numpy as np
 
 st.set_page_config(layout="wide")
-st.title("🌍 Animated ROAS Dashboard (Choropleth by week, global scale)")
+st.title("🌍 Animated ROAS Dashboard (Choropleth by week, 99th percentile, min installs filter)")
 
 @st.cache_data
 def load_data():
@@ -21,41 +21,28 @@ choropleth_metric = st.selectbox(
     index=metrics.index("roas_w0") if "roas_w0" in metrics else 0
 )
 
-st.write(f"Выбрана метрика: {choropleth_metric}")
-st.write(f"Минимум: {metric_min}, Максимум: {metric_max}")
-# Фильтруем страны, где installs < 300 за неделю
-display_df = df.copy()
-display_df = display_df[display_df['installs'] >= 300]
+# --- Вот здесь фильтруем по installs ---
+min_installs = 300
+display_df = df[df['installs'] >= min_installs].copy()
 
+# --- Домножаем на 100, если это ROAS ---
 if "roas" in choropleth_metric.lower():
     display_df[choropleth_metric] = display_df[choropleth_metric] * 100
 
 display_df['week'] = display_df['week'].astype(str)
 
-# Игнорируем выбросы — 99-й перцентиль только по оставшимся данным!
+# --- 99-й перцентиль по выбранной метрике ---
 if "roas" in choropleth_metric.lower():
-    roas_vals = display_df[choropleth_metric][display_df[choropleth_metric] > 0]
-    metric_max = np.percentile(roas_vals, 99)
+    vals = display_df[choropleth_metric][display_df[choropleth_metric] > 0]
+    metric_max = np.percentile(vals, 99) if not vals.empty else 1
     metric_min = 0
 else:
-    metric_min = display_df[choropleth_metric].min()
-    metric_max = np.percentile(display_df[choropleth_metric], 99)
+    vals = display_df[choropleth_metric]
+    metric_min = vals.min()
+    metric_max = np.percentile(vals, 99) if not vals.empty else 1
 
-# дальше всё как раньше...
-
-# Домножаем, если это ROAS
-display_df = df.copy()
-if "roas" in choropleth_metric.lower():
-    display_df[choropleth_metric] = display_df[choropleth_metric] * 100
-
-display_df['week'] = display_df['week'].astype(str)
-
-if "roas" in choropleth_metric.lower():
-    metric_min = display_df[choropleth_metric][display_df[choropleth_metric] > 0].min()
-    metric_max = display_df[choropleth_metric].max()
-else:
-    metric_min = display_df[choropleth_metric].min()
-    metric_max = display_df[choropleth_metric].max()
+color_scales = ['Viridis', 'Plasma', 'Cividis', 'Inferno', 'Turbo', 'Bluered', 'Magma']
+color_scale = st.selectbox("🎨 Цветовая схема", color_scales, index=0)
 
 fig = px.choropleth(
     display_df,
@@ -66,10 +53,9 @@ fig = px.choropleth(
     animation_frame="week",
     color_continuous_scale=color_scale,
     projection="natural earth",
-    range_color=[metric_min, metric_max] if metric_max > metric_min else None,
-    title=f"Animated {choropleth_metric} by Country and Week"
+    range_color=[metric_min, metric_max],
+    title=f"Animated {choropleth_metric} (%) by Country and Week"
 )
-
 
 fig.update_geos(
     showcoastlines=True,
@@ -86,7 +72,6 @@ fig.update_layout(
     coloraxis_colorbar=dict(title=f"{choropleth_metric} (%)")
 )
 
-# Ховер с форматированием как процент
 fig.update_traces(
     hovertemplate="<b>%{hovertext}</b><br>" +
     f"{choropleth_metric}: " + "%{z:.2f}%" +
