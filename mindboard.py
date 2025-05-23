@@ -2,9 +2,11 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import pycountry
+import matplotlib
+import matplotlib.cm
 
 st.set_page_config(layout="wide")
-st.title("🪄 Комбинированная динамика: ROAS vs LTV/CPI")
+st.title("🌍 ROAS vs LTV/CPI — Динамика по неделям + вес installs")
 
 @st.cache_data
 def load_data():
@@ -12,88 +14,114 @@ def load_data():
 
 df = load_data()
 
-channels = ["Все"] + sorted(df['channel'].unique())
-selected_channel = st.selectbox("Канал", channels)
-df_filtered = df.copy()
-if selected_channel != "Все":
-    df_filtered = df_filtered[df_filtered['channel'] == selected_channel]
+# Метрики для второй оси
+ltv_metrics = ['lifetime_value', 'ltv_adv', 'ltv_iap', 'cpi']  # под свои названия!
+all_metrics = ['roas_w0'] + ltv_metrics
 
-# --- Фильтр по installs ---
-min_installs = 300
-df_filtered = df_filtered[df_filtered['installs'] >= min_installs]
+# Глобальный фильтр по installs за всё время
+country_installs = df.groupby('country', as_index=False)['installs'].sum()
+country_list = country_installs[country_installs['installs'] > 300].sort_values('installs', ascending=False)
+top_countries = country_list['country'].tolist()[:5]
 
-# --- Метрики и страны ---
-exclude_cols = {"week", "country", "channel"}
-all_metrics = [col for col in df.columns if df[col].dtype in [float, int] and col not in exclude_cols]
-
-# Основная метрика по левой оси (например, roas_w0)
-main_metric = st.selectbox(
-    "Основная метрика (левая ось Y)", 
-    [m for m in all_metrics if "roas" in m.lower()],
-    index=0
-)
-
-# Метрики по правой оси
-right_metrics = ["cpi", "lifetime_value", "ltv_adv", "ltv_sub"]  # укажи названия как в твоём CSV!
-right_metrics = [m for m in right_metrics if m in all_metrics]
-
-all_countries = sorted(df_filtered['country'].unique())
-selected_countries = st.multiselect("Страны", all_countries, default=all_countries[:3])
-df_plot = df_filtered[df_filtered['country'].isin(selected_countries)]
-
-# --- Добавляем флаги для красоты ---
-def country_to_flag(country_name):
+st.subheader("Выберите страны для сравнения (installs > 300 за всё время):")
+selected_countries = []
+for country in country_list['country']:
+    flag = ''
     try:
-        country = pycountry.countries.lookup(country_name)
-        return ''.join([chr(127397 + ord(c)) for c in country.alpha_2.upper()])
+        country_obj = pycountry.countries.lookup(country)
+        flag = ''.join([chr(127397 + ord(c)) for c in country_obj.alpha_2.upper()])
     except Exception:
-        return ''
-df_plot['country_flag'] = df_plot['country'].apply(country_to_flag)
-df_plot['country_label'] = df_plot['country_flag'] + ' ' + df_plot['country']
+        pass
+    checked = st.checkbox(f"{flag} {country} ({int(country_list[country_list['country']==country]['installs'])} installs)", 
+                          value=country in top_countries, key=country)
+    if checked:
+        selected_countries.append(country)
 
-# --- Преобразуем ROAS в % ---
-if "roas" in main_metric.lower():
-    df_plot[main_metric] = df_plot[main_metric] * 100
+if not selected_countries:
+    st.warning("Выбери хотя бы одну страну!")
+    st.stop()
 
-# --- Сортируем недели для корректного графика ---
-weeks = sorted(df_plot['week'].unique())
-df_plot['week'] = pd.Categorical(df_plot['week'], categories=weeks, ordered=True)
+# Фильтр по странам и installs (по неделям)
+df_view = df[df['country'].isin(selected_countries)].copy()
+df_view['roas_w0'] = df_view['roas_w0'] * 100
 
-# --- Построение комбинированного графика ---
+# Сортируем недели
+weeks = sorted(df_view['week'].unique())
+df_view['week'] = pd.Categorical(df_view['week'], categories=weeks, ordered=True)
+
+# Для градиента по installs
+min_installs = df_view['installs'].min()
+max_installs = df_view['installs'].max()
+colormap = matplotlib.cm.get_cmap('viridis')
+
+def installs_to_color(installs):
+    norm_val = (installs - min_installs) / (max_installs - min_installs) if max_installs > min_installs else 0.5
+    return matplotlib.colors.rgb2hex(colormap(norm_val))
+
+def installs_to_width(installs):
+    # Ширина линии от 2 до 6, пропорционально installs
+    if max_installs > min_installs:
+        return 2 + 4 * (installs - min_installs) / (max_installs - min_installs)
+    else:
+        return 4
+
+# График: комбинированный (ROAS слева, остальные — справа)
 fig = go.Figure()
 
-# Основная ось Y — ROAS (или что выбрано), по странам
 for country in selected_countries:
-    mask = df_plot['country'] == country
+    country_mask = df_view['country'] == country
+    flag = ''
+    try:
+        country_obj = pycountry.countries.lookup(country)
+        flag = ''.join([chr(127397 + ord(c)) for c in country_obj.alpha_2.upper()])
+    except Exception:
+        pass
+    label = f"{flag} {country}"
+
+    # Градиент и ширина по installs (берём installs по каждой неделе, список)
+    installs_vals = df_view[country_mask]['installs'].tolist()
+    color_vals = [installs_to_color(inst) for inst in installs_vals]
+    width_vals = [installs_to_width(inst) for inst in installs_vals]
+
+    # ROAS — левая ось, индивидуальный стиль для каждой точки линии
     fig.add_trace(go.Scatter(
-        x=df_plot[mask]['week'],
-        y=df_plot[mask][main_metric],
-        name=f"{main_metric.upper()} {country_to_flag(country)} {country}",
+        x=df_view[country_mask]['week'],
+        y=df_view[country_mask]['roas_w0'],
+        name=f"ROAS (%) {label}",
         mode="lines+markers",
-        yaxis="y1"
+        yaxis="y1",
+        # Только для всего trace можно color/width, но можно разбить на сегменты если хочется прям “градиент”
+        line=dict(color=installs_to_color(df_view[country_mask]['installs'].mean()), width=installs_to_width(df_view[country_mask]['installs'].mean())),
+        marker=dict(
+            color=color_vals,
+            size=10,
+            line=dict(width=2, color='white')
+        ),
+        showlegend=True,
     ))
 
-# Правая ось Y2 — остальные метрики (по странам)
-color_map = ["#A93226", "#2874A6", "#229954", "#AF7AC5", "#F5B041"]
-for idx, metric in enumerate(right_metrics):
-    for country in selected_countries:
-        mask = df_plot['country'] == country
+    # LTV All, Ad, IAP, CPI — правая ось
+    for m_idx, metric in enumerate(ltv_metrics):
+        if metric not in df_view.columns:
+            continue
         fig.add_trace(go.Scatter(
-            x=df_plot[mask]['week'],
-            y=df_plot[mask][metric],
-            name=f"{metric.upper()} {country_to_flag(country)} {country}",
+            x=df_view[country_mask]['week'],
+            y=df_view[country_mask][metric],
+            name=f"{metric.upper()} {label}",
             mode="lines+markers",
             yaxis="y2",
-            line=dict(dash='dot', color=color_map[idx % len(color_map)])
+            line=dict(dash='dot', color=f"rgba(160,160,{100 + 30*m_idx},0.7)"),
+            marker=dict(size=7),
+            showlegend=(country == selected_countries[0])
         ))
 
-# Лейаут и подписи
+# Layout с осями и цветовой легендой
 fig.update_layout(
-    title="Сравнение динамики: основная метрика (Y1) + LTV/CPI/др. (Y2)",
+    title="ROAS (%) — цвет/толщина по installs, LTV/CPI ($) — правая ось",
     xaxis=dict(title="Неделя"),
-    yaxis=dict(title=f"{main_metric.upper()} (%)" if 'roas' in main_metric.lower() else main_metric.upper()),
+    yaxis=dict(title="ROAS (%)", side='left'),
     yaxis2=dict(
-        title="CPI / LTV / Adv LTV / Sub LTV",
+        title="LTV All / LTV Ad / LTV IAP / CPI ($)",
         overlaying='y',
         side='right',
         showgrid=False,
@@ -103,7 +131,8 @@ fig.update_layout(
         yanchor="bottom",
         y=1.02,
         xanchor="center",
-        x=0.5
+        x=0.5,
+        font=dict(size=11)
     ),
     margin=dict(r=30, t=60, l=30, b=30),
     height=600
