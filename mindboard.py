@@ -21,6 +21,10 @@ choropleth_metric = st.selectbox(
     index=metrics.index("roas_w0") if "roas_w0" in metrics else 0
 )
 
+st.write(f"Выбрана метрика: {choropleth_metric}")
+st.write(f"Минимум: {metric_min}, Максимум: {metric_max}")
+
+
 # Домножаем, если это ROAS
 display_df = df.copy()
 if "roas" in choropleth_metric.lower():
@@ -28,12 +32,12 @@ if "roas" in choropleth_metric.lower():
 
 display_df['week'] = display_df['week'].astype(str)
 
-# Глобальный min/max по всем неделям, без нулей
-metric_min = display_df[choropleth_metric][display_df[choropleth_metric] > 0].min()
-metric_max = display_df[choropleth_metric].max()
-
-color_scales = ['Viridis', 'Plasma', 'Cividis', 'Inferno', 'Turbo', 'Bluered', 'Magma']
-color_scale = st.selectbox("🎨 Цветовая схема", color_scales, index=0)
+if "roas" in choropleth_metric.lower():
+    metric_min = display_df[choropleth_metric][display_df[choropleth_metric] > 0].min()
+    metric_max = display_df[choropleth_metric].max()
+else:
+    metric_min = display_df[choropleth_metric].min()
+    metric_max = display_df[choropleth_metric].max()
 
 fig = px.choropleth(
     display_df,
@@ -45,8 +49,9 @@ fig = px.choropleth(
     color_continuous_scale=color_scale,
     projection="natural earth",
     range_color=[metric_min, metric_max] if metric_max > metric_min else None,
-    title=f"Animated {choropleth_metric} (%) by Country and Week"
+    title=f"Animated {choropleth_metric} by Country and Week"
 )
+
 
 fig.update_geos(
     showcoastlines=True,
