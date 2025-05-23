@@ -2,3 +2,4 @@ streamlit
 pandas
 pycountry
 emoji
+matplotlib
