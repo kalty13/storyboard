@@ -14,40 +14,58 @@ def load_data():
 
 df = load_data()
 
-# Метрики для второй оси — обязательно проверь названия!
 ltv_metrics = ['lifetime_value', 'ltv_adv', 'ltv_iap', 'cpi']  # свои названия!
 roas_metric = 'roas_w0'
 
-# 1. Глобально по installs за всё время — только страны >300
+# Глобально по installs за всё время
 country_installs = df.groupby('country', as_index=False)['installs'].sum()
 country_list = country_installs[country_installs['installs'] > 300].sort_values('installs', ascending=False)
 top_countries = country_list['country'].tolist()[:5]
 
-# 2. Готовим фильтр по странам (выведем чекбоксы ПОД графиком)
-selected_countries = top_countries  # временно, покажем все чекбоксы ниже
+st.markdown("---")
+st.subheader("Страны (показаны только с installs > 300 за всё время):")
 
-# 3. Подготовка данных для графика
-df['roas_w0'] = df['roas_w0'] * 100
-weeks = sorted(df['week'].unique())
+# Формируем список чекбоксов — ПОД графиком
+updated_countries = []
+for country in country_list['country']:
+    flag = ''
+    try:
+        country_obj = pycountry.countries.lookup(country)
+        flag = ''.join([chr(127397 + ord(c)) for c in country_obj.alpha_2.upper()])
+    except Exception:
+        pass
+    checked = st.checkbox(
+        f"{flag} {country} ({int(country_list[country_list['country']==country]['installs'])} installs)",
+        value=country in top_countries, key=f"ck_{country}"
+    )
+    if checked:
+        updated_countries.append(country)
 
-# 4. Фильтруем только выбранные страны
-df_plot = df[df['country'].isin(selected_countries)].copy()
+if not updated_countries:
+    st.warning("Выбери хотя бы одну страну!")
+    st.stop()
+
+# Данные только по выбранным странам
+df_plot = df[df['country'].isin(updated_countries)].copy()
+df_plot[roas_metric] = df_plot[roas_metric] * 100
+
+weeks = sorted(df_plot['week'].unique())
 df_plot['week'] = pd.Categorical(df_plot['week'], categories=weeks, ordered=True)
 
-# 5. Для цвета bar-ов по installs:
-min_installs = df_plot['installs'].min()
-max_installs = df_plot['installs'].max()
+# Цветовая шкала по installs для bar-ов
+min_installs = df_plot['installs'].min() if not df_plot.empty else 0
+max_installs = df_plot['installs'].max() if not df_plot.empty else 1
 colormap = matplotlib.cm.get_cmap('viridis')
 
 def installs_to_color(installs):
     norm_val = (installs - min_installs) / (max_installs - min_installs) if max_installs > min_installs else 0.5
     return matplotlib.colors.rgb2hex(colormap(norm_val))
 
-# 6. Строим график
+# --- Сам график
 fig = go.Figure()
 
-# ROAS — бар-чарт с градиентом по installs
-for country in selected_countries:
+# ROAS — вертикальные бары (градиент installs)
+for country in updated_countries:
     flag = ''
     try:
         country_obj = pycountry.countries.lookup(country)
@@ -56,7 +74,6 @@ for country in selected_countries:
         pass
     mask = df_plot['country'] == country
     color_vals = [installs_to_color(inst) for inst in df_plot[mask]['installs']]
-    # Бары: 1 bar = 1 неделя
     fig.add_trace(go.Bar(
         x=df_plot[mask]['week'],
         y=df_plot[mask][roas_metric],
@@ -66,12 +83,12 @@ for country in selected_countries:
         opacity=0.88
     ))
 
-# LTV, CPI и др. — линии (Y2)
+# LTV/CPI — линии (Y2)
 line_colors = ['#e74c3c', '#3498db', '#27ae60', '#8e44ad', '#f1c40f', '#16a085']
 for m_idx, metric in enumerate(ltv_metrics):
     if metric not in df_plot.columns:
         continue
-    for country in selected_countries:
+    for country in updated_countries:
         flag = ''
         try:
             country_obj = pycountry.countries.lookup(country)
@@ -89,17 +106,18 @@ for m_idx, metric in enumerate(ltv_metrics):
             showlegend=True
         ))
 
-# Оси и layout
+# Layout
 fig.update_layout(
     barmode="group",
-    title="ROAS (Бары, цвет = installs) + LTV/CPI (Линии) по неделям",
+    title="ROAS (Бары, цвет = installs) + LTV/CPI (Линии, правая ось) по неделям",
     xaxis=dict(title="Неделя"),
-    yaxis=dict(title="ROAS (%)", side='left'),
+    yaxis=dict(title="ROAS (%)", side='left', rangemode='tozero'),
     yaxis2=dict(
         title="LTV All / LTV Ad / LTV IAP / CPI ($)",
         overlaying='y',
         side='right',
         showgrid=False,
+        rangemode='tozero'
     ),
     legend=dict(
         orientation="h",
@@ -110,31 +128,7 @@ fig.update_layout(
         font=dict(size=11)
     ),
     margin=dict(r=30, t=60, l=30, b=30),
-    height=640
+    height=680,
 )
 
 st.plotly_chart(fig, use_container_width=True)
-
-# =========== Список чекбоксов по странам ПОД графиком ==========
-st.markdown("---")
-st.subheader("Страны (показаны только с installs > 300 за всё время):")
-
-updated_countries = []
-for country in country_list['country']:
-    flag = ''
-    try:
-        country_obj = pycountry.countries.lookup(country)
-        flag = ''.join([chr(127397 + ord(c)) for c in country_obj.alpha_2.upper()])
-    except Exception:
-        pass
-    checked = st.checkbox(
-        f"{flag} {country} ({int(country_list[country_list['country']==country]['installs'])} installs)",
-        value=country in top_countries, key=f"ck_{country}"
-    )
-    if checked:
-        updated_countries.append(country)
-
-# Если пользователь изменил выбор — обновим график (перезапусти страницу или сохрани selected_countries в session_state)
-if set(updated_countries) != set(selected_countries):
-    st.info("Измени выбор стран — нажми 'Rerun' или обнови страницу для обновления графика!")
-
