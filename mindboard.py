@@ -135,18 +135,19 @@ else:
 color_scales = ['Viridis', 'Plasma', 'Cividis', 'Inferno', 'Turbo', 'Bluered', 'Magma']
 color_scale = st.selectbox("🎨 Цветовая схема", color_scales, index=0)
 
+# Для отладки — хардкодим диапазон!
 fig = px.choropleth(
-    display_df,
+    df_week,
     locations="country",
     locationmode="country names",
     color=choropleth_metric,
     hover_name="country",
-    animation_frame="week",
-    color_continuous_scale=color_scale,
+    color_continuous_scale='Viridis',  # или Turbo
     projection="natural earth",
-    range_color=[metric_min, metric_max],
-    title=f"Animated {choropleth_metric} (%) by Country and Week"
+    range_color=[0, 100],  # Всегда 0–100%
+    title=f"{choropleth_metric} (%) by Country — {selected_week}"
 )
+
 
 fig.update_geos(
     showcoastlines=True,
