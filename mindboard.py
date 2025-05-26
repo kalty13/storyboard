@@ -1,12 +1,12 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
+import plotly.express as px
 import pycountry
 import matplotlib
 import matplotlib.cm
 
 st.set_page_config(layout="wide")
-st.title("🌍 ROAS (Bar, grad by installs) + LTV/CPI (Lines) — по неделям")
+st.title("🌍 ROAS by Country — Horizontal Bar Chart")
 
 @st.cache_data
 def load_data():
@@ -14,121 +14,104 @@ def load_data():
 
 df = load_data()
 
-ltv_metrics = ['lifetime_value', 'ltv_adv', 'ltv_iap', 'cpi']  # свои названия!
-roas_metric = 'roas_w0'
+# 1. Фильтр по каналу
+channels = ["Все"] + sorted(df['channel'].unique())
+selected_channel = st.selectbox("Канал", channels)
+df_filtered = df.copy()
+if selected_channel != "Все":
+    df_filtered = df_filtered[df_filtered['channel'] == selected_channel]
 
-# Глобально по installs за всё время
-country_installs = df.groupby('country', as_index=False)['installs'].sum()
-country_list = country_installs[country_installs['installs'] > 300].sort_values('installs', ascending=False)
-top_countries = country_list['country'].tolist()[:5]
+# 2. Слайдер по неделям
+weeks = sorted(df_filtered['week'].unique())
+week_idx = st.slider("Неделя", min_value=0, max_value=len(weeks)-1, value=0, format="%d")
+selected_week = weeks[week_idx]
 
-st.markdown("---")
-st.subheader("Страны (показаны только с installs > 300 за всё время):")
+# 3. Фильтр по installs
+min_installs = 300
+df_week = df_filtered[(df_filtered['week'] == selected_week) & (df_filtered['installs'] >= min_installs)].copy()
 
-# Формируем список чекбоксов — ПОД графиком
-updated_countries = []
-for country in country_list['country']:
-    flag = ''
+# 4. Метрики
+exclude_cols = {"week", "country", "channel"}
+metrics = [col for col in df.columns if df[col].dtype in [float, int] and col not in exclude_cols]
+choropleth_metric = st.selectbox(
+    "Основная метрика (ROAS, LTV и т.д.)",
+    metrics,
+    index=metrics.index("roas_w0") if "roas_w0" in metrics else 0
+)
+
+# Вторая метрика (для подписи)
+secondary_metric = st.selectbox(
+    "Вторая метрика (доп. подпись)", 
+    [""] + metrics,
+    index=0
+)
+
+# 5. Перевод ROAS в проценты
+if "roas" in choropleth_metric.lower():
+    df_week[choropleth_metric] = df_week[choropleth_metric] * 100
+if secondary_metric and "roas" in secondary_metric.lower():
+    df_week[secondary_metric] = df_week[secondary_metric] * 100
+
+# 6. Агрегация по стране (если дубликаты)
+agg_dict = {choropleth_metric: 'max', 'installs': 'sum'}
+if secondary_metric:
+    agg_dict[secondary_metric] = 'max'
+df_week_agg = df_week.groupby('country', as_index=False).agg(agg_dict)
+
+# 7. Добавляем флаги и подписи
+def country_to_flag(country_name):
     try:
-        country_obj = pycountry.countries.lookup(country)
-        flag = ''.join([chr(127397 + ord(c)) for c in country_obj.alpha_2.upper()])
+        country = pycountry.countries.lookup(country_name)
+        return ''.join([chr(127397 + ord(c)) for c in country.alpha_2.upper()])
     except Exception:
-        pass
-    checked = st.checkbox(
-        f"{flag} {country} ({int(country_list[country_list['country']==country]['installs'])} installs)",
-        value=country in top_countries, key=f"ck_{country}"
-    )
-    if checked:
-        updated_countries.append(country)
+        return ''
 
-if not updated_countries:
-    st.warning("Выбери хотя бы одну страну!")
-    st.stop()
+df_week_agg['flag'] = df_week_agg['country'].apply(country_to_flag)
 
-# Данные только по выбранным странам
-df_plot = df[df['country'].isin(updated_countries)].copy()
-df_plot[roas_metric] = df_plot[roas_metric] * 100
+# Собираем лейбл с двумя метриками
+def build_label(row):
+    parts = [row['flag'], row['country']]
+    if secondary_metric:
+        if "roas" in secondary_metric.lower():
+            sec = f"{row[secondary_metric]:.1f}%"
+        else:
+            sec = f"{row[secondary_metric]:.2f}"
+        parts.append(f"[{sec}]")
+    parts.append(f"({row['installs']} installs)")
+    return " ".join(parts)
 
-weeks = sorted(df_plot['week'].unique())
-df_plot['week'] = pd.Categorical(df_plot['week'], categories=weeks, ordered=True)
+df_week_agg['country_label'] = df_week_agg.apply(build_label, axis=1)
 
-# Цветовая шкала по installs для bar-ов
-min_installs = df_plot['installs'].min() if not df_plot.empty else 0
-max_installs = df_plot['installs'].max() if not df_plot.empty else 1
-colormap = matplotlib.cm.get_cmap('viridis')
+# 8. Цветовой градиент для баров (от min до max)
+norm = matplotlib.colors.Normalize(
+    vmin=df_week_agg[choropleth_metric].min(), vmax=df_week_agg[choropleth_metric].max()
+)
+colormap = matplotlib.cm.get_cmap('plasma')
+df_week_agg['bar_color'] = df_week_agg[choropleth_metric].apply(lambda x: matplotlib.colors.rgb2hex(colormap(norm(x))))
 
-def installs_to_color(installs):
-    norm_val = (installs - min_installs) / (max_installs - min_installs) if max_installs > min_installs else 0.5
-    return matplotlib.colors.rgb2hex(colormap(norm_val))
+# 9. Барплот
+fig = px.bar(
+    df_week_agg,
+    y='country_label',
+    x=choropleth_metric,
+    orientation='h',
+    text=choropleth_metric,
+    labels={choropleth_metric: f"{choropleth_metric} (%)", "country_label": "Страна"},
+    title=f"{choropleth_metric} by Country — {selected_week}"
+)
 
-# --- Сам график
-fig = go.Figure()
-
-# ROAS — вертикальные бары (градиент installs)
-for country in updated_countries:
-    flag = ''
-    try:
-        country_obj = pycountry.countries.lookup(country)
-        flag = ''.join([chr(127397 + ord(c)) for c in country_obj.alpha_2.upper()])
-    except Exception:
-        pass
-    mask = df_plot['country'] == country
-    color_vals = [installs_to_color(inst) for inst in df_plot[mask]['installs']]
-    fig.add_trace(go.Bar(
-        x=df_plot[mask]['week'],
-        y=df_plot[mask][roas_metric],
-        name=f"ROAS {flag} {country}",
-        marker_color=color_vals,
-        yaxis='y1',
-        opacity=0.88
-    ))
-
-# LTV/CPI — линии (Y2)
-line_colors = ['#e74c3c', '#3498db', '#27ae60', '#8e44ad', '#f1c40f', '#16a085']
-for m_idx, metric in enumerate(ltv_metrics):
-    if metric not in df_plot.columns:
-        continue
-    for country in updated_countries:
-        flag = ''
-        try:
-            country_obj = pycountry.countries.lookup(country)
-            flag = ''.join([chr(127397 + ord(c)) for c in country_obj.alpha_2.upper()])
-        except Exception:
-            pass
-        mask = df_plot['country'] == country
-        fig.add_trace(go.Scatter(
-            x=df_plot[mask]['week'],
-            y=df_plot[mask][metric],
-            name=f"{metric.upper()} {flag} {country}",
-            mode="lines+markers",
-            yaxis="y2",
-            line=dict(color=line_colors[m_idx % len(line_colors)], width=3, dash='dot'),
-            showlegend=True
-        ))
-
-# Layout
+fig.update_traces(
+    marker_color=df_week_agg['bar_color'],
+    texttemplate='%{text:.2f}%',
+    textposition='outside'
+)
 fig.update_layout(
-    barmode="group",
-    title="ROAS (Бары, цвет = installs) + LTV/CPI (Линии, правая ось) по неделям",
-    xaxis=dict(title="Неделя"),
-    yaxis=dict(title="ROAS (%)", side='left', rangemode='tozero'),
-    yaxis2=dict(
-        title="LTV All / LTV Ad / LTV IAP / CPI ($)",
-        overlaying='y',
-        side='right',
-        showgrid=False,
-        rangemode='tozero'
-    ),
-    legend=dict(
-        orientation="h",
-        yanchor="bottom",
-        y=1.05,
-        xanchor="center",
-        x=0.5,
-        font=dict(size=11)
-    ),
-    margin=dict(r=30, t=60, l=30, b=30),
-    height=680,
+    yaxis={'categoryorder':'total ascending'},
+    autosize=True,
+    margin={"r":30,"t":40,"l":0,"b":0},
+    height=50 + len(df_week_agg)*30,
+    xaxis_title=f"{choropleth_metric} (%)",
+    yaxis_title=None
 )
 
 st.plotly_chart(fig, use_container_width=True)
