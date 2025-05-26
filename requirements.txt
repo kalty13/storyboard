@@ -3,3 +3,4 @@ pandas
 pycountry
 emoji
 matplotlib
+plotly
